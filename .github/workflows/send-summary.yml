@@ -2,7 +2,7 @@ name: Weekly Twitter Summary
 
 on:
   schedule:
-    - cron: '0 7 * * 1' # Runs at 8am UK time (7am UTC)
+    - cron: '0 7 * * 1'
   workflow_dispatch:
 
 jobs:
@@ -28,4 +28,3 @@ jobs:
         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
       run: python main.py
-
