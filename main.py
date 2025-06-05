@@ -1,17 +1,18 @@
 import os
-import openai
+import json
 import subprocess
 import datetime
-import json
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from openai import OpenAI
 
 # === Load Config & Setup ===
 with open("config.json", "r") as f:
     config = json.load(f)
 
-openai.api_key = os.environ["OPENAI_API_KEY"]
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
 sender = config["sender_email"]
 recipients = config["receiver_emails"]
 subject = config["email_subject"]
@@ -45,7 +46,7 @@ def scrape_tweets(keyword):
 def summarise_tweets(keyword, tweets):
     posts_text = "\n".join([t["content"] for t in tweets[:20]])
     prompt = f"""
-Analyse the following recent posts about "{keyword}" from X (formerly Twitter).
+Analyse the following recent posts about \"{keyword}\" from X (formerly Twitter).
 Provide a concise paragraph including:
 - Sentiment overview (positive, negative, neutral)
 - Key discussion themes
@@ -56,18 +57,14 @@ Posts:
 
 Summarise clearly and professionally:
 """
-try:
-    from openai import OpenAI
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-
-response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
-    messages=[{"role": "user", "content": prompt}],
-    temperature=0.7,
-    max_tokens=300
-)
-summary = response.choices[0].message.content.strip()
-        # Try extracting a sentiment tag for the one-line summary
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=300
+        )
+        summary = response.choices[0].message.content.strip()
         if "positive" in summary.lower():
             sentiment = "Positive"
         elif "negative" in summary.lower():
