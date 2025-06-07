@@ -29,7 +29,7 @@ with open("keywords.txt", "r") as f:
 with open("config.json", "r") as f:
     config = json.load(f)
 print("DEBUG - config loaded:", config)
-recipient_email = config["recipient_email"]
+recipient_emails = config["receiver_emails"]
 sender_email = config["sender_email"]
 days_back = config.get("days_back", 7)
 
@@ -146,7 +146,8 @@ def send_email(html_content):
     msg = MIMEText(html_content, "html")
     msg["Subject"] = "Weekly Keyword Summary"
     msg["From"] = formataddr(("Keyword Bot", sender_email))
-    msg["To"] = recipient_email
+    msg["To"] = ", ".join(recipient_emails)
+    server.sendmail(sender_email, recipient_emails, msg.as_string())
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
