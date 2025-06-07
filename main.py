@@ -1,62 +1,68 @@
 import os
-import openai
-import subprocess
-import datetime
 import json
 import smtplib
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+import tweepy
 import praw
-print("DEBUG - REDDIT_CLIENT_ID found:", "REDDIT_CLIENT_ID" in os.environ)
+import openai
 
-# === OpenAI & Reddit Client Setup ===
-from openai import OpenAI
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+load_dotenv()
 
+# === Twitter API Setup ===
+twitter_client = tweepy.Client(bearer_token=os.getenv("TWITTER_BEARER_TOKEN"))
+
+# === Reddit API Setup ===
 reddit = praw.Reddit(
-    client_id=os.environ["REDDIT_CLIENT_ID"],
-    client_secret=os.environ["REDDIT_CLIENT_SECRET"],
-    user_agent="social-listening-script"
+    client_id=os.getenv("REDDIT_CLIENT_ID"),
+    client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
+    user_agent="keyword-sentiment-tracker"
 )
 
-# === Load Config & Keywords ===
-with open("config.json", "r") as f:
-    config = json.load(f)
-
-sender = config["sender_email"]
-recipients = config["receiver_emails"]
-subject = config["email_subject"]
-days_back = config["days_back"]
-timezone = config["timezone"]
-
+# === Load keyword list ===
 with open("keywords.txt", "r") as f:
     keywords = [line.strip() for line in f if line.strip()]
 
-# === Date Range Formatting ===
-today = datetime.datetime.utcnow()
-since_date = today - datetime.timedelta(days=days_back)
-since_str = since_date.strftime("%Y-%m-%d")
-until_str = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-since_nice = since_date.strftime("%-d %B")
-until_nice = today.strftime("%-d %B")
+# === Load config ===
+with open("config.json", "r") as f:
+    config = json.load(f)
 
-# === Scrape Tweets with snscrape ===
-def scrape_tweets(keyword):
-    clean_keyword = f'"{keyword}"' if " " in keyword else keyword
-    query = f'{clean_keyword} since:{since_str} until:{until_str}'
-    print("SCRAPE DEBUG:", "snscrape", "--jsonl", "twitter-search", query)
-    cmd = ["snscrape", "--jsonl", "twitter-search", query]
+recipient_email = config["recipient_email"]
+sender_email = config["sender_email"]
+days_back = config.get("days_back", 7)
+
+# === Date range ===
+end_time = datetime.now(timezone.utc)
+start_time = end_time - timedelta(days=days_back)
+date_range_display = f"{start_time.strftime('%-d %B')} to {end_time.strftime('%-d %B')}"
+
+# === Tweet scraping ===
+def fetch_tweets(keyword, start_time, end_time, max_results=100):
+    query = f'"{keyword}" -is:retweet lang:en'
+    tweets = []
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        lines = result.stdout.strip().split("\n")
-        tweets = [json.loads(line) for line in lines if line]
-        print("SCRAPE RESULT COUNT:", len(tweets))
-        return tweets
+        for tweet in tweepy.Paginator(
+            twitter_client.search_recent_tweets,
+            query=query,
+            start_time=start_time,
+            end_time=end_time,
+            tweet_fields=['created_at', 'public_metrics', 'text'],
+            max_results=100
+        ).flatten(limit=max_results):
+            tweets.append({
+                "text": tweet.text,
+                "created_at": tweet.created_at,
+                "retweet_count": tweet.public_metrics.get("retweet_count", 0),
+                "like_count": tweet.public_metrics.get("like_count", 0),
+                "url": f"https://twitter.com/i/web/status/{tweet.id}"
+            })
     except Exception as e:
-        print(f"Error scraping {keyword}: {e}")
-        return []
+        print(f"Error fetching tweets for {keyword}: {e}")
+    return tweets
 
-# === Scrape Reddit Posts ===
+# === Reddit scraping ===
 def scrape_reddit(keyword, limit=20):
     results = []
     for submission in reddit.subreddit("all").search(keyword, sort="relevance", time_filter="week", limit=limit):
@@ -70,106 +76,87 @@ def scrape_reddit(keyword, limit=20):
             })
     return results
 
+# === Summarisation ===
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# === Generate Email Body ===
-email_body = f"<h2>Weekly Keyword Summary</h2>"
-email_body += f"<p>Analysis from {since_nice} to {until_nice}</p><hr>"
+def summarise_posts(posts, keyword):
+    text_blob = "\n".join(p["text"] for p in posts if "text" in p)
+    prompt = f"""Summarise the following online posts about "{keyword}" over the past 7 days.
+Give a sentiment overview, key talking points, and briefly highlight themes.
 
-for keyword in keywords:
-    email_body += f"<h3>{keyword}</h3>"
+{text_blob[:3000]}"""
 
-    # === Twitter Section ===
-    tweets = scrape_tweets(keyword)
-    posts_text = "\n".join([t["content"] for t in tweets[:20]])
-    summary = "No data available."
-    sentiment = "Unknown"
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=300
+        )
+        summary = response.choices[0].message.content.strip()
+        sentiment = "Neutral"
+        if "positive" in summary.lower():
+            sentiment = "Positive"
+        elif "negative" in summary.lower():
+            sentiment = "Negative"
+        return summary, sentiment
+    except Exception as e:
+        return f"Error generating summary for {keyword}: {e}", "Unknown"
 
-    if tweets:
-        prompt = f"""
-Analyse the following recent posts about "{keyword}" from X (formerly Twitter).
-Provide a concise paragraph including:
-- Sentiment overview (positive, negative, neutral)
-- Key discussion themes
-- Include links to 2–3 high-engagement posts if relevant
+# === Generate and send email ===
+def build_email_content():
+    all_blocks = []
+    for keyword in keywords:
+        block = f"<h2>{keyword}</h2>"
+        block += f"<p><b>Analysis from:</b> {date_range_display}</p>"
 
-Posts:
-{posts_text}
+        # Twitter
+        tweets = fetch_tweets(keyword, start_time, end_time)
+        block += f"<p><b>Twitter posts analysed:</b> {len(tweets)}</p>"
+        if tweets:
+            tweets_sorted = sorted(tweets, key=lambda x: x["like_count"], reverse=True)
+            top_links = "".join(f'<li><a href="{t["url"]}">{t["text"][:60]}...</a></li>' for t in tweets_sorted[:3])
+            twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
+            block += f"<p>{twitter_summary}</p>"
+            block += f"<ul>{top_links}</ul>"
+        else:
+            block += "<p>No Twitter data available.</p>"
+            twitter_sentiment = "Unknown"
 
-Summarise clearly and professionally:
-"""
-        try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=300
-            )
-            summary = response.choices[0].message.content.strip()
-            if "positive" in summary.lower():
-                sentiment = "Positive"
-            elif "negative" in summary.lower():
-                sentiment = "Negative"
-            else:
-                sentiment = "Neutral"
-        except Exception as e:
-            summary = f"Error generating summary for {keyword}: {e}"
+        # Reddit
+        reddit_posts = scrape_reddit(keyword)
+        block += f"<p><b>Reddit posts analysed:</b> {len(reddit_posts)}</p>"
+        if reddit_posts:
+            reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
+            top_reddit = "".join(f'<li><a href="{p["url"]}">{p["title"][:60]}...</a></li>' for p in reddit_posts[:3])
+            block += f"<p>{reddit_summary}</p>"
+            block += f"<ul>{top_reddit}</ul>"
+        else:
+            block += "<p>No Reddit data available.</p>"
+            reddit_sentiment = "Unknown"
 
-    tweet_links = sorted(tweets, key=lambda t: t.get("viewCount", t.get("retweetCount", 0)), reverse=True)[:3]
-    top_links_html = "<br>".join([f"<a href='{t['url']}'>Tweet Link</a>" for t in tweet_links])
+        block += f"<p><b>Overall sentiment:</b> {twitter_sentiment or reddit_sentiment}</p>"
+        search_url = f"https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query"
+        block += f'<p><a href="{search_url}">View on Twitter</a></p>'
+        all_blocks.append(block)
 
-    email_body += f"<p><strong>Posts analysed:</strong> {len(tweets)}<br>"
-    email_body += f"<strong>Sentiment:</strong> {sentiment}<br>"
-    email_body += f"<strong>Search link:</strong> <a href='https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query'>View on Twitter</a></p>"
-    email_body += f"<p>{summary}</p>"
-    if tweet_links:
-        email_body += f"<p><strong>Top Tweets:</strong><br>{top_links_html}</p>"
-    email_body += "<hr>"
+    return "<html><body>" + "".join(all_blocks) + "</body></html>"
 
-    # === Reddit Section ===
-    reddit_posts = scrape_reddit(keyword)
-    if reddit_posts:
-        reddit_text = "\n\n".join([f"{post['title']} - {post['text']}" for post in reddit_posts[:10]])
-        reddit_prompt = f"""
-Analyse the following Reddit posts discussing "{keyword}".
-
-Provide a short paragraph summary including:
-- General sentiment
-- Key discussion themes
-- Include 2–3 of the most upvoted links if relevant
-
-Reddit posts:
-{reddit_text}
-"""
-        try:
-            reddit_summary = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": reddit_prompt}],
-                temperature=0.7,
-                max_tokens=300
-            ).choices[0].message.content.strip()
-        except Exception as e:
-            reddit_summary = f"Error generating Reddit summary: {e}"
-
-        reddit_links = sorted(reddit_posts, key=lambda p: p["score"], reverse=True)[:3]
-        reddit_links_html = "<br>".join([f"<a href='{p['url']}'>Reddit Post</a>" for p in reddit_links])
-
-        email_body += f"<h4>Reddit Summary</h4><p>{reddit_summary}</p>"
-        email_body += f"<p><strong>Top Reddit Posts:</strong><br>{reddit_links_html}</p><hr>"
-
-# === Send Email ===
-def send_email(subject, body, sender, recipients):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
-    msg.attach(MIMEText(body, "html"))
+def send_email(html_content):
+    msg = MIMEText(html_content, "html")
+    msg["Subject"] = "Weekly Keyword Summary"
+    msg["From"] = formataddr(("Keyword Bot", sender_email))
+    msg["To"] = recipient_email
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender, os.environ["EMAIL_APP_PASSWORD"])
-            server.sendmail(sender, recipients, msg.as_string())
+            server.login(sender_email, os.getenv("EMAIL_APP_PASSWORD"))
+            server.sendmail(sender_email, recipient_email, msg.as_string())
         print("✅ Email sent.")
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
 
-send_email(subject, email_body, sender, recipients)
+# === Run everything ===
+if __name__ == "__main__":
+    email_content = build_email_content()
+    send_email(email_content)
