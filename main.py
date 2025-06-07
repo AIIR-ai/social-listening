@@ -36,7 +36,7 @@ with open("keywords.txt", "r") as f:
 today = datetime.datetime.utcnow()
 since_date = today - datetime.timedelta(days=days_back)
 since_str = since_date.strftime("%Y-%m-%d")
-until_str = today.strftime("%Y-%m-%d")
+until_str = (today + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
 since_nice = since_date.strftime("%-d %B")
 until_nice = today.strftime("%-d %B")
 
