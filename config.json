@@ -2,6 +2,6 @@
   "sender_email": "ai.insight.resources@gmail.com",
   "receiver_emails": ["ai.insight.resources@gmail.com", "joshsilford12@hotmail.com"],
   "timezone": "Europe/London",
-  "email_subject": "Weekly X Client Social Listening",
+  "email_subject": "Weekly Social Listening",
   "days_back": 7
 }
