@@ -57,14 +57,16 @@ def scrape_tweets(keyword):
 def scrape_reddit(keyword, limit=20):
     results = []
     for submission in reddit.subreddit("all").search(keyword, sort="relevance", time_filter="week", limit=limit):
-        results.append({
-            "title": submission.title,
-            "text": submission.selftext,
-            "url": submission.url,
-            "score": submission.score,
-            "num_comments": submission.num_comments
-        })
+        if keyword.lower() in submission.title.lower() or keyword.lower() in submission.selftext.lower():
+            results.append({
+                "title": submission.title,
+                "text": submission.selftext,
+                "url": submission.url,
+                "score": submission.score,
+                "num_comments": submission.num_comments
+            })
     return results
+
 
 # === Generate Email Body ===
 email_body = f"<h2>Weekly Keyword Summary</h2>"
