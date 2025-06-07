@@ -22,8 +22,8 @@ timezone = config["timezone"]
 # === Get Date Range ===
 today = datetime.datetime.utcnow()
 since_date = today - datetime.timedelta(days=days_back)
-since_str = since_date.strftime("%Y-%m-%d")
-until_str = today.strftime("%Y-%m-%d")
+since_str = since_date.strftime("%-d %B")
+until_str = today.strftime("%-d %B")
 
 # === Load Keywords ===
 with open("keywords.txt", "r") as f:
@@ -31,7 +31,7 @@ with open("keywords.txt", "r") as f:
 
 # === Helper: Scrape Tweets ===
 def scrape_tweets(keyword):
-    query = f'"{keyword}" since:{since_str} until:{until_str}'
+    query = f'"{keyword}" since:{since_date.strftime("%Y-%m-%d")} until:{today.strftime("%Y-%m-%d")}'
     cmd = ["snscrape", "--jsonl", "twitter-search", query]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -76,7 +76,7 @@ Summarise clearly and professionally:
         return f"Error generating summary for {keyword}: {e}", "Unknown"
 
 # === Compose Email Content ===
-email_body = f"<h2>Weekly Keyword Summary</h2>"
+email_body = f"<h2>Weekly Social Analysis</h2>"
 email_body += f"<p>Analysis from {since_str} to {until_str}</p><hr>"
 
 for keyword in keywords:
@@ -85,11 +85,24 @@ for keyword in keywords:
     total = len(tweets)
     search_url = f"https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query"
 
+    # Sort tweets by viewCount (if available) and extract top 3 links
+    top_links = ""
+    if tweets:
+        sorted_tweets = sorted(tweets, key=lambda x: x.get("viewCount", 0), reverse=True)
+        top_links = "<ul>"
+        for tweet in sorted_tweets[:3]:
+            tweet_url = f"https://twitter.com/{tweet['user']['username']}/status/{tweet['id']}"
+            top_links += f"<li><a href='{tweet_url}'>Top post</a></li>"
+        top_links += "</ul>"
+
     email_body += f"<h3>{keyword}</h3>"
     email_body += f"<p><strong>Posts analysed:</strong> {total}<br>"
     email_body += f"<strong>Sentiment:</strong> {sentiment}<br>"
     email_body += f"<strong>Search link:</strong> <a href='{search_url}'>View on Twitter</a></p>"
-    email_body += f"<p>{summary}</p><hr>"
+    email_body += f"<p>{summary}</p>"
+    if top_links:
+        email_body += f"<p><strong>Top posts:</strong>{top_links}</p>"
+    email_body += f"<hr>"
 
 # === Send Email ===
 def send_email(subject, body, sender, recipients):
