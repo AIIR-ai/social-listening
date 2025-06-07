@@ -7,6 +7,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import praw
+print("DEBUG - REDDIT_CLIENT_ID found:", "REDDIT_CLIENT_ID" in os.environ)
 
 # === OpenAI & Reddit Client Setup ===
 from openai import OpenAI
