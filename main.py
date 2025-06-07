@@ -144,15 +144,14 @@ def build_email_content():
 
 def send_email(html_content):
     msg = MIMEText(html_content, "html")
-    msg["Subject"] = "Weekly Keyword Summary"
+    msg["Subject"] = config.get("email_subject", "Weekly Keyword Summary")
     msg["From"] = formataddr(("Keyword Bot", sender_email))
     msg["To"] = ", ".join(recipient_emails)
-    server.sendmail(sender_email, recipient_emails, msg.as_string())
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(sender_email, os.getenv("EMAIL_APP_PASSWORD"))
-            server.sendmail(sender_email, recipient_email, msg.as_string())
+            server.sendmail(sender_email, recipient_emails, msg.as_string())
         print("✅ Email sent.")
     except Exception as e:
         print(f"❌ Failed to send email: {e}")
