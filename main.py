@@ -28,7 +28,7 @@ with open("keywords.txt", "r") as f:
 # === Load config ===
 with open("config.json", "r") as f:
     config = json.load(f)
-
+print("DEBUG - config loaded:", config)
 recipient_email = config["recipient_email"]
 sender_email = config["sender_email"]
 days_back = config.get("days_back", 7)
