@@ -42,7 +42,7 @@ until_nice = today.strftime("%-d %B")
 
 # === Scrape Tweets with snscrape ===
 def scrape_tweets(keyword):
-    query = f'"{keyword}" since:{since_str} until:{until_str}'
+    query = f'{keyword} since:{since_str} until:{until_str}'
     cmd = ["snscrape", "--jsonl", "twitter-search", query]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
