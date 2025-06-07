@@ -20,8 +20,7 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install openai email-validator beautifulsoup4 lxml praw
-        pip install git+https://github.com/JustAnotherArchivist/snscrape.git
+        pip install openai tweepy praw python-dotenv email-validator beautifulsoup4 lxml
 
     - name: Run script
       env:
