@@ -50,6 +50,7 @@ def scrape_tweets(keyword):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         lines = result.stdout.strip().split("\n")
         tweets = [json.loads(line) for line in lines if line]
+        print("SCRAPE RESULT COUNT:", len(tweets))
         return tweets
     except Exception as e:
         print(f"Error scraping {keyword}: {e}")
