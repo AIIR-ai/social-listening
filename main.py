@@ -1,18 +1,16 @@
 import os
 import json
 import smtplib
+import subprocess
+import time
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
-import tweepy
 import praw
 import openai
 
 load_dotenv()
-
-# === Twitter API Setup ===
-twitter_client = tweepy.Client(bearer_token=os.getenv("TWITTER_BEARER_TOKEN"))
 
 # === Reddit API Setup ===
 reddit = praw.Reddit(
@@ -28,7 +26,7 @@ with open("keywords.txt", "r") as f:
 # === Load config ===
 with open("config.json", "r") as f:
     config = json.load(f)
-print("DEBUG - config loaded:", config)
+
 recipient_emails = config["receiver_emails"]
 sender_email = config["sender_email"]
 days_back = config.get("days_back", 7)
@@ -38,29 +36,26 @@ end_time = datetime.now(timezone.utc)
 start_time = end_time - timedelta(days=days_back)
 date_range_display = f"{start_time.strftime('%-d %B')} to {end_time.strftime('%-d %B')}"
 
-# === Tweet scraping ===
-def fetch_tweets(keyword, start_time, end_time, max_results=100):
-    query = f'"{keyword}" -is:retweet lang:en'
-    tweets = []
-    try:
-        for tweet in tweepy.Paginator(
-            twitter_client.search_recent_tweets,
-            query=query,
-            start_time=start_time,
-            end_time=end_time,
-            tweet_fields=['created_at', 'public_metrics', 'text'],
-            max_results=100
-        ).flatten(limit=max_results):
-            tweets.append({
-                "text": tweet.text,
-                "created_at": tweet.created_at,
-                "retweet_count": tweet.public_metrics.get("retweet_count", 0),
-                "like_count": tweet.public_metrics.get("like_count", 0),
-                "url": f"https://twitter.com/i/web/status/{tweet.id}"
-            })
-    except Exception as e:
-        print(f"Error fetching tweets for {keyword}: {e}")
-    return tweets
+# === Twitter (snscrape) ===
+def run_snscrape(keyword, max_retries=3, delay=5):
+    query = f'{keyword} since:{start_time.date()} until:{end_time.date()}'
+    for attempt in range(max_retries):
+        try:
+            result = subprocess.run(
+                ["snscrape", "--jsonl", "twitter-search", query],
+                capture_output=True, text=True, check=True
+            )
+            if result.stdout.strip():
+                tweets = [json.loads(line) for line in result.stdout.splitlines()]
+                return tweets
+            else:
+                print(f"Attempt {attempt + 1}: No tweets returned. Retrying...")
+        except Exception as e:
+            print(f"Attempt {attempt + 1}: snscrape error: {e}")
+        time.sleep(delay)
+    with open("failed_queries.log", "a") as log:
+        log.write(f"{time.ctime()}: {query}\n")
+    return []
 
 # === Reddit scraping ===
 def scrape_reddit(keyword, limit=20):
@@ -80,8 +75,8 @@ def scrape_reddit(keyword, limit=20):
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def summarise_posts(posts, keyword):
-    text_blob = "\n".join(p["text"] for p in posts if "text" in p)
-    prompt = f"""Summarise the following online posts about "{keyword}" over the past 7 days.
+    text_blob = "\n".join(p.get("text", p.get("title", "")) for p in posts)
+    prompt = f"""Summarise the following online posts about \"{keyword}\" over the past 7 days.
 Give a sentiment overview, key talking points, and briefly highlight themes.
 
 {text_blob[:3000]}"""
@@ -111,11 +106,11 @@ def build_email_content():
         block += f"<p><b>Analysis from:</b> {date_range_display}</p>"
 
         # Twitter
-        tweets = fetch_tweets(keyword, start_time, end_time)
+        tweets = run_snscrape(keyword)
         block += f"<p><b>Twitter posts analysed:</b> {len(tweets)}</p>"
         if tweets:
-            tweets_sorted = sorted(tweets, key=lambda x: x["like_count"], reverse=True)
-            top_links = "".join(f'<li><a href="{t["url"]}">{t["text"][:60]}...</a></li>' for t in tweets_sorted[:3])
+            tweets_sorted = sorted(tweets, key=lambda x: x.get("likeCount", 0), reverse=True)
+            top_links = "".join(f'<li><a href=\"{t[\"url\"]}\">{t[\"content\"][:60]}...</a></li>' for t in tweets_sorted[:3])
             twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
             block += f"<p>{twitter_summary}</p>"
             block += f"<ul>{top_links}</ul>"
@@ -128,7 +123,7 @@ def build_email_content():
         block += f"<p><b>Reddit posts analysed:</b> {len(reddit_posts)}</p>"
         if reddit_posts:
             reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
-            top_reddit = "".join(f'<li><a href="{p["url"]}">{p["title"][:60]}...</a></li>' for p in reddit_posts[:3])
+            top_reddit = "".join(f'<li><a href=\"{p[\"url\"]}\">{p[\"title\"][:60]}...</a></li>' for p in reddit_posts[:3])
             block += f"<p>{reddit_summary}</p>"
             block += f"<ul>{top_reddit}</ul>"
         else:
