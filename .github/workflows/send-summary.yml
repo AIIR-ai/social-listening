@@ -1,8 +1,8 @@
-name: Weekly Twitter Summary
+name: Weekly Social Listening Summary
 
 on:
   schedule:
-    - cron: '0 7 * * 1'
+    - cron: '0 7 * * 1'  # Every Monday at 7am UTC
   workflow_dispatch:
 
 jobs:
@@ -21,6 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install openai tweepy praw python-dotenv email-validator beautifulsoup4 lxml
+        pip install snscrape
 
     - name: Run script
       env:
@@ -28,5 +29,4 @@ jobs:
         EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
         REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
         REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-
       run: python main.py
