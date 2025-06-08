@@ -39,20 +39,29 @@ date_range_display = f"Week of {start_time.strftime('%A, %d %B %Y')} to {end_tim
 # === Twitter (snscrape) ===
 def run_snscrape(keyword, max_retries=3, delay=5):
     query = f'{keyword} since:{start_time.date()} until:{end_time.date()}'
+    print(f"[snscrape] Running query: {query}")
+
     for attempt in range(max_retries):
         try:
             result = subprocess.run(
                 ["snscrape", "--jsonl", "twitter-search", query],
-                capture_output=True, text=True, check=True
+                capture_output=True, text=True
             )
-            if result.stdout.strip():
-                tweets = [json.loads(line) for line in result.stdout.splitlines()]
-                return tweets
+            if result.returncode != 0:
+                print(f"[snscrape] Error (attempt {attempt + 1}): {result.stderr.strip()}")
             else:
-                print(f"Attempt {attempt + 1}: No tweets returned. Retrying...")
+                lines = result.stdout.strip().splitlines()
+                print(f"[snscrape] Attempt {attempt + 1} returned {len(lines)} lines")
+                if lines:
+                    tweets = [json.loads(line) for line in lines]
+                    return tweets
+                else:
+                    print("[snscrape] No results returned.")
         except Exception as e:
-            print(f"Attempt {attempt + 1}: snscrape error: {e}")
+            print(f"[snscrape] Exception on attempt {attempt + 1}: {e}")
         time.sleep(delay)
+
+    print(f"[snscrape] All attempts failed for query: {query}")
     with open("failed_queries.log", "a") as log:
         log.write(f"{time.ctime()}: {query}\n")
     return []
@@ -76,10 +85,15 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def summarise_posts(posts, keyword):
     text_blob = "\n".join(p.get("text", p.get("title", "")) for p in posts)
-    prompt = f"""Summarise the following online posts about \"{keyword}\" over the past 7 days.
-Give a sentiment overview, key talking points, and briefly highlight themes.
+    prompt = f"""
+You are an analyst summarising online discussions around the keyword \"{keyword}\" from the past 7 days. Structure your summary clearly in three parts:
 
-{text_blob[:3000]}"""
+1. Sentiment: A concise summary of the overall tone (positive, negative, or neutral).
+2. Key Talking Points: Bullet-point style list of what users are discussing. If a talking point clearly refers to a specific post, write it as '[Post]'.
+3. Themes: A list of short, 1–3 word phrases that capture recurring ideas or topics.
+
+{text_blob[:3000]}
+"""
 
     try:
         response = openai.chat.completions.create(
@@ -96,13 +110,24 @@ Give a sentiment overview, key talking points, and briefly highlight themes.
         elif "negative" in summary_raw.lower():
             sentiment = "<b style='color:red;'>Negative</b>"
 
-        summary = "".join([
-            f"<p><b>{section.strip()}:</b><br>{content.strip()}</p>"
-            for section, content in zip(
-                ["Sentiment Overview", "Key Talking Points", "Themes"],
-                summary_raw.split("\n")
-            ) if content.strip()
-        ])
+        # Split summary into 3 sections using known headings
+        sections = {"Sentiment": "", "Key Talking Points": "", "Themes": ""}
+        current = None
+        for line in summary_raw.splitlines():
+            line = line.strip()
+            if line.lower().startswith("sentiment"):
+                current = "Sentiment"
+            elif line.lower().startswith("key talking"):
+                current = "Key Talking Points"
+            elif line.lower().startswith("themes"):
+                current = "Themes"
+            elif current:
+                sections[current] += line + "\n"
+
+        # Format sections
+        summary = ""
+        for title in ["Sentiment", "Key Talking Points", "Themes"]:
+            summary += f"<p><b>{title}:</b><br>{sections[title].strip()}</p>"
 
         return summary, sentiment
     except Exception as e:
