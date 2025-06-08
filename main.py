@@ -110,7 +110,7 @@ def build_email_content():
         block += f"<p><b>Twitter posts analysed:</b> {len(tweets)}</p>"
         if tweets:
             tweets_sorted = sorted(tweets, key=lambda x: x.get("likeCount", 0), reverse=True)
-            top_links = "".join(f'<li><a href=\"{t[\"url\"]}\">{t[\"content\"][:60]}...</a></li>' for t in tweets_sorted[:3])
+            top_links = "".join(f"<li><a href='{t['url']}'>{t['content'][:60]}...</a></li>" for t in tweets_sorted[:3])
             twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
             block += f"<p>{twitter_summary}</p>"
             block += f"<ul>{top_links}</ul>"
@@ -123,7 +123,7 @@ def build_email_content():
         block += f"<p><b>Reddit posts analysed:</b> {len(reddit_posts)}</p>"
         if reddit_posts:
             reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
-            top_reddit = "".join(f'<li><a href=\"{p[\"url\"]}\">{p[\"title\"][:60]}...</a></li>' for p in reddit_posts[:3])
+            top_reddit = "".join(f"<li><a href='{p['url']}'>{p['title'][:60]}...</a></li>" for p in reddit_posts[:3])
             block += f"<p>{reddit_summary}</p>"
             block += f"<ul>{top_reddit}</ul>"
         else:
