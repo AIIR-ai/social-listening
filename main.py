@@ -85,15 +85,10 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def summarise_posts(posts, keyword):
     text_blob = "\n".join(p.get("text", p.get("title", "")) for p in posts)
-    prompt = f"""
-You are an analyst summarising online discussions around the keyword \"{keyword}\" from the past 7 days. Structure your summary clearly in three parts:
+    prompt = f"""Summarise the following online posts about \"{keyword}\" over the past 7 days.
+Give a sentiment overview, key talking points, and briefly highlight themes.
 
-1. Sentiment: A concise summary of the overall tone (positive, negative, or neutral).
-2. Key Talking Points: Bullet-point style list of what users are discussing. If a talking point clearly refers to a specific post, write it as '[Post]'.
-3. Themes: A list of short, 1–3 word phrases that capture recurring ideas or topics.
-
-{text_blob[:3000]}
-"""
+{text_blob[:3000]}"""
 
     try:
         response = openai.chat.completions.create(
@@ -102,34 +97,13 @@ You are an analyst summarising online discussions around the keyword \"{keyword}
             temperature=0.7,
             max_tokens=300
         )
-        summary_raw = response.choices[0].message.content.strip()
-
+        summary = response.choices[0].message.content.strip()
         sentiment = "Neutral"
-        if "positive" in summary_raw.lower():
+        if "positive" in summary.lower():
             sentiment = "<b style='color:green;'>Positive</b>"
-        elif "negative" in summary_raw.lower():
+        elif "negative" in summary.lower():
             sentiment = "<b style='color:red;'>Negative</b>"
-
-        # Split summary into 3 sections using known headings
-        sections = {"Sentiment": "", "Key Talking Points": "", "Themes": ""}
-        current = None
-        for line in summary_raw.splitlines():
-            line = line.strip()
-            if line.lower().startswith("sentiment"):
-                current = "Sentiment"
-            elif line.lower().startswith("key talking"):
-                current = "Key Talking Points"
-            elif line.lower().startswith("themes"):
-                current = "Themes"
-            elif current:
-                sections[current] += line + "\n"
-
-        # Format sections
-        summary = ""
-        for title in ["Sentiment", "Key Talking Points", "Themes"]:
-            summary += f"<p><b>{title}:</b><br>{sections[title].strip()}</p>"
-
-        return summary, sentiment
+        return f"<p>{summary}</p>", sentiment
     except Exception as e:
         return f"<p>Error generating summary for {keyword}: {e}</p>", "Unknown"
 
@@ -153,13 +127,12 @@ def build_email_content():
             tweets_sorted = sorted(tweets, key=lambda x: x.get("likeCount", 0), reverse=True)
             twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
             block += f"<p><b>Sentiment (X):</b> {twitter_sentiment}</p>"
-            block += f"{twitter_summary}"
+            block += twitter_summary
             block += "<ul>" + "".join(
                 f"<li><a href='{t['url']}'>{t['content'][:80]}...</a></li>"
                 for t in tweets_sorted[:3]) + "</ul>"
         else:
             block += "<p>No X data available.</p>"
-            twitter_sentiment = "Unknown"
 
         # Reddit
         reddit_posts = scrape_reddit(keyword)
@@ -167,13 +140,12 @@ def build_email_content():
         if reddit_posts:
             reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
             block += f"<p><b>Sentiment (Reddit):</b> {reddit_sentiment}</p>"
-            block += f"{reddit_summary}"
+            block += reddit_summary
             block += "<ul>" + "".join(
                 f"<li><a href='{p['url']}'>{p['title'][:80]}...</a></li>"
                 for p in reddit_posts[:3]) + "</ul>"
         else:
             block += "<p>No Reddit data available.</p>"
-            reddit_sentiment = "Unknown"
 
         block += f"<p><a href='https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query'>Search this keyword on X</a></p>"
         block += "</div>"
