@@ -34,7 +34,7 @@ days_back = config.get("days_back", 7)
 # === Date range ===
 end_time = datetime.now(timezone.utc)
 start_time = end_time - timedelta(days=days_back)
-date_range_display = f"{start_time.strftime('%-d %B')} to {end_time.strftime('%-d %B')}"
+date_range_display = f"Week of {start_time.strftime('%A, %d %B %Y')} to {end_time.strftime('%A, %d %B %Y')}"
 
 # === Twitter (snscrape) ===
 def run_snscrape(keyword, max_retries=3, delay=5):
@@ -100,39 +100,48 @@ Give a sentiment overview, key talking points, and briefly highlight themes.
 
 # === Generate and send email ===
 def build_email_content():
+    x_logo = "https://upload.wikimedia.org/wikipedia/commons/9/95/Twitter_new_X_logo.png"
+    reddit_logo = "https://upload.wikimedia.org/wikipedia/en/8/82/Reddit_logo_and_wordmark.svg"
+
     all_blocks = []
     for keyword in keywords:
-        block = f"<h2>{keyword}</h2>"
-        block += f"<p><b>Analysis from:</b> {date_range_display}</p>"
+        block = f"""
+        <div style='border:1px solid #ccc; padding:15px; margin:20px 0;'>
+            <h2>{keyword}</h2>
+            <p><b>Week:</b> {date_range_display}</p>
+        """
 
-        # Twitter
+        # X
         tweets = run_snscrape(keyword)
-        block += f"<p><b>Twitter posts analysed:</b> {len(tweets)}</p>"
+        block += f"<h3><img src='{x_logo}' alt='X logo' width='20' style='vertical-align:middle;'> X Posts Analysed: {len(tweets)}</h3>"
         if tweets:
             tweets_sorted = sorted(tweets, key=lambda x: x.get("likeCount", 0), reverse=True)
-            top_links = "".join(f"<li><a href='{t['url']}'>{t['content'][:60]}...</a></li>" for t in tweets_sorted[:3])
             twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
+            block += f"<p><b>Sentiment (X):</b> {twitter_sentiment}</p>"
             block += f"<p>{twitter_summary}</p>"
-            block += f"<ul>{top_links}</ul>"
+            block += "<ul>" + "".join(
+                f"<li><a href='{t['url']}'>{t['content'][:80]}...</a></li>"
+                for t in tweets_sorted[:3]) + "</ul>"
         else:
-            block += "<p>No Twitter data available.</p>"
+            block += "<p>No X data available.</p>"
             twitter_sentiment = "Unknown"
 
         # Reddit
         reddit_posts = scrape_reddit(keyword)
-        block += f"<p><b>Reddit posts analysed:</b> {len(reddit_posts)}</p>"
+        block += f"<h3><img src='{reddit_logo}' alt='Reddit logo' width='20' style='vertical-align:middle;'> Reddit Posts Analysed: {len(reddit_posts)}</h3>"
         if reddit_posts:
             reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
-            top_reddit = "".join(f"<li><a href='{p['url']}'>{p['title'][:60]}...</a></li>" for p in reddit_posts[:3])
+            block += f"<p><b>Sentiment (Reddit):</b> {reddit_sentiment}</p>"
             block += f"<p>{reddit_summary}</p>"
-            block += f"<ul>{top_reddit}</ul>"
+            block += "<ul>" + "".join(
+                f"<li><a href='{p['url']}'>{p['title'][:80]}...</a></li>"
+                for p in reddit_posts[:3]) + "</ul>"
         else:
             block += "<p>No Reddit data available.</p>"
             reddit_sentiment = "Unknown"
 
-        block += f"<p><b>Overall sentiment:</b> {twitter_sentiment or reddit_sentiment}</p>"
-        search_url = f"https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query"
-        block += f'<p><a href="{search_url}">View on Twitter</a></p>'
+        block += f"<p><a href='https://twitter.com/search?q={keyword.replace(' ', '%20')}&src=typed_query'>Search this keyword on X</a></p>"
+        block += "</div>"
         all_blocks.append(block)
 
     return "<html><body>" + "".join(all_blocks) + "</body></html>"
