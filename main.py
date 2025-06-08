@@ -88,20 +88,30 @@ Give a sentiment overview, key talking points, and briefly highlight themes.
             temperature=0.7,
             max_tokens=300
         )
-        summary = response.choices[0].message.content.strip()
+        summary_raw = response.choices[0].message.content.strip()
+
         sentiment = "Neutral"
-        if "positive" in summary.lower():
-            sentiment = "Positive"
-        elif "negative" in summary.lower():
-            sentiment = "Negative"
+        if "positive" in summary_raw.lower():
+            sentiment = "<b style='color:green;'>Positive</b>"
+        elif "negative" in summary_raw.lower():
+            sentiment = "<b style='color:red;'>Negative</b>"
+
+        summary = "".join([
+            f"<p><b>{section.strip()}:</b><br>{content.strip()}</p>"
+            for section, content in zip(
+                ["Sentiment Overview", "Key Talking Points", "Themes"],
+                summary_raw.split("\n")
+            ) if content.strip()
+        ])
+
         return summary, sentiment
     except Exception as e:
-        return f"Error generating summary for {keyword}: {e}", "Unknown"
+        return f"<p>Error generating summary for {keyword}: {e}</p>", "Unknown"
 
 # === Generate and send email ===
 def build_email_content():
     x_logo = "https://upload.wikimedia.org/wikipedia/commons/9/95/Twitter_new_X_logo.png"
-    reddit_logo = "https://upload.wikimedia.org/wikipedia/en/8/82/Reddit_logo_and_wordmark.svg"
+    reddit_logo = "https://redditinc.com/hs-fs/hubfs/Reddit%20Inc/Content/Brand%20Page/Reddit_Logo.png?width=800&height=800&name=Reddit_Logo.png"
 
     all_blocks = []
     for keyword in keywords:
@@ -118,7 +128,7 @@ def build_email_content():
             tweets_sorted = sorted(tweets, key=lambda x: x.get("likeCount", 0), reverse=True)
             twitter_summary, twitter_sentiment = summarise_posts(tweets, keyword)
             block += f"<p><b>Sentiment (X):</b> {twitter_sentiment}</p>"
-            block += f"<p>{twitter_summary}</p>"
+            block += f"{twitter_summary}"
             block += "<ul>" + "".join(
                 f"<li><a href='{t['url']}'>{t['content'][:80]}...</a></li>"
                 for t in tweets_sorted[:3]) + "</ul>"
@@ -132,7 +142,7 @@ def build_email_content():
         if reddit_posts:
             reddit_summary, reddit_sentiment = summarise_posts(reddit_posts, keyword)
             block += f"<p><b>Sentiment (Reddit):</b> {reddit_sentiment}</p>"
-            block += f"<p>{reddit_summary}</p>"
+            block += f"{reddit_summary}"
             block += "<ul>" + "".join(
                 f"<li><a href='{p['url']}'>{p['title'][:80]}...</a></li>"
                 for p in reddit_posts[:3]) + "</ul>"
@@ -147,8 +157,11 @@ def build_email_content():
     return "<html><body>" + "".join(all_blocks) + "</body></html>"
 
 def send_email(html_content):
+    subject_date = start_time.strftime("w/c %d %B %Y")
+    subject_line = f"AIIR Weekly Social Listening – {subject_date}"
+
     msg = MIMEText(html_content, "html")
-    msg["Subject"] = config.get("email_subject", "Weekly Keyword Summary")
+    msg["Subject"] = subject_line
     msg["From"] = formataddr(("AIIR Weekly Social Listening", sender_email))
     msg["To"] = ", ".join(recipient_emails)
 
