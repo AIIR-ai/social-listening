@@ -140,7 +140,7 @@ def build_email_content():
 def send_email(html_content):
     msg = MIMEText(html_content, "html")
     msg["Subject"] = config.get("email_subject", "Weekly Keyword Summary")
-    msg["From"] = formataddr(("Keyword Bot", sender_email))
+    msg["From"] = formataddr(("AIIR Weekly Social Listening", sender_email))
     msg["To"] = ", ".join(recipient_emails)
 
     try:
